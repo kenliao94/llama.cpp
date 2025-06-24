@@ -1,0 +1,82 @@
+{
+  "examples": [
+    {
+      "name": "Simple text generation",
+      "request": {
+        "id": "simple-request-1",
+        "prompt": "Write a short story about a robot learning to paint.",
+        "max_tokens": 200,
+        "temperature": 0.8
+      }
+    },
+    {
+      "name": "Chat with system prompt",
+      "request": {
+        "id": "chat-request-1",
+        "prompt": "What is the weather like today?",
+        "system_prompt": "You are a helpful weather assistant. Always be cheerful and provide accurate information.",
+        "max_tokens": 150,
+        "temperature": 0.7
+      }
+    },
+    {
+      "name": "Creative writing with stop sequences",
+      "request": {
+        "id": "creative-request-1",
+        "prompt": "Once upon a time, in a world where magic was real...",
+        "max_tokens": 300,
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 50,
+        "stop_sequences": ["The End", "FIN", "\n\n\n"]
+      }
+    },
+    {
+      "name": "Code generation",
+      "request": {
+        "id": "code-request-1",
+        "prompt": "Write a Python function to calculate the fibonacci sequence.",
+        "system_prompt": "You are a helpful programming assistant. Write clean, well-documented code.",
+        "max_tokens": 250,
+        "temperature": 0.3,
+        "stop_sequences": ["```", "\n\n\n"]
+      }
+    },
+    {
+      "name": "Question answering",
+      "request": {
+        "id": "qa-request-1",
+        "prompt": "What are the main benefits of renewable energy?",
+        "system_prompt": "You are an expert on environmental science and renewable energy. Provide accurate, informative answers.",
+        "max_tokens": 180,
+        "temperature": 0.6,
+        "top_p": 0.9
+      }
+    }
+  ],
+  "response_format": {
+    "id": "request-id-echoed-back",
+    "content": "Generated text content",
+    "finished": true,
+    "finish_reason": "length|stop|eos",
+    "prompt_tokens": 15,
+    "completion_tokens": 45,
+    "total_time_ms": 1250.5,
+    "error": "Error message if processing failed"
+  },
+  "configuration": {
+    "rabbitmq": {
+      "host": "localhost",
+      "port": 5672,
+      "username": "guest",
+      "password": "guest",
+      "vhost": "/"
+    },
+    "queues": {
+      "request_queue": "llama_requests",
+      "response_queue": "llama_responses",
+      "exchange": "llama_exchange",
+      "routing_key": "llama.inference"
+    }
+  }
+} 
