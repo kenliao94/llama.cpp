@@ -10,12 +10,10 @@ Usage:
 """
 
 import argparse
-import json
 import pika
 import sys
 import time
-import uuid
-from typing import Dict, Any
+from typing import Optional
 
 
 class LlamaMessagingClient:
@@ -29,15 +27,15 @@ class LlamaMessagingClient:
         self.password = password
         self.vhost = vhost
         
-        # Default queue and exchange names
-        self.request_queue = 'llama_requests'
-        self.response_queue = 'llama_responses'
-        self.exchange = 'llama_exchange'
-        self.routing_key = 'llama.inference'
+        # Updated queue and exchange names to match messaging.cpp
+        self.request_queue = 'inference_request'
+        self.response_queue = 'inference_response'
+        self.exchange = 'amq.direct'
+        self.request_routing_key = 'inference.request'
+        self.response_routing_key = 'inference.response'
         
         self.connection = None
         self.channel = None
-        self.response_callback = None
 
     def connect(self) -> bool:
         """Connect to RabbitMQ and set up channels."""
@@ -57,9 +55,22 @@ class LlamaMessagingClient:
             self.channel.queue_declare(queue=self.request_queue, durable=True)
             self.channel.queue_declare(queue=self.response_queue, durable=True)
             self.channel.exchange_declare(exchange=self.exchange, exchange_type='direct', durable=True)
-            self.channel.queue_bind(exchange=self.exchange, queue=self.request_queue, routing_key=self.routing_key)
+            
+            # Bind queues to exchange with routing keys
+            self.channel.queue_bind(
+                exchange=self.exchange, 
+                queue=self.request_queue, 
+                routing_key=self.request_routing_key
+            )
+            self.channel.queue_bind(
+                exchange=self.exchange, 
+                queue=self.response_queue, 
+                routing_key=self.response_routing_key
+            )
             
             print(f"Connected to RabbitMQ at {self.host}:{self.port}")
+            print(f"Request queue: {self.request_queue}")
+            print(f"Response queue: {self.response_queue}")
             return True
             
         except Exception as e:
@@ -71,29 +82,23 @@ class LlamaMessagingClient:
         if self.connection and not self.connection.is_closed:
             self.connection.close()
 
-    def send_request(self, request: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
+    def send_request(self, prompt: str, timeout: float = 30.0) -> str:
         """Send an inference request and wait for response."""
         if not self.channel:
             raise RuntimeError("Not connected to RabbitMQ")
         
-        # Generate request ID if not provided
-        if 'id' not in request:
-            request['id'] = str(uuid.uuid4())
-        
-        request_id = request['id']
         response_received = False
         response_data = None
         
         def response_callback(ch, method, properties, body):
             nonlocal response_received, response_data
             try:
-                response = json.loads(body.decode('utf-8'))
-                if response.get('id') == request_id:
-                    response_data = response
-                    response_received = True
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    ch.stop_consuming()
-            except json.JSONDecodeError as e:
+                # Response is now plain text, not JSON
+                response_data = body.decode('utf-8')
+                response_received = True
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                ch.stop_consuming()
+            except Exception as e:
                 print(f"Failed to parse response: {e}")
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         
@@ -104,15 +109,18 @@ class LlamaMessagingClient:
             auto_ack=False
         )
         
-        # Send request
-        request_body = json.dumps(request)
+        # Send request (plain text, not JSON)
         self.channel.basic_publish(
             exchange=self.exchange,
-            routing_key=self.routing_key,
-            body=request_body
+            routing_key=self.request_routing_key,
+            body=prompt,
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # persistent message
+                content_type='text/plain'
+            )
         )
         
-        print(f"Sent request {request_id}: {request.get('prompt', '')[:50]}...")
+        print(f"Sent request: {prompt[:50]}...")
         
         # Wait for response
         start_time = time.time()
@@ -124,28 +132,13 @@ class LlamaMessagingClient:
                 break
         
         if not response_received:
-            raise TimeoutError(f"Timeout waiting for response to request {request_id}")
+            raise TimeoutError(f"Timeout waiting for response")
         
         return response_data
 
-    def send_simple_request(self, prompt: str, max_tokens: int = 128, 
-                           temperature: float = 0.8, system_prompt: str = "") -> str:
+    def send_simple_request(self, prompt: str) -> str:
         """Send a simple text generation request."""
-        request = {
-            'prompt': prompt,
-            'max_tokens': max_tokens,
-            'temperature': temperature
-        }
-        
-        if system_prompt:
-            request['system_prompt'] = system_prompt
-        
-        response = self.send_request(request)
-        
-        if 'error' in response:
-            raise RuntimeError(f"Request failed: {response['error']}")
-        
-        return response.get('content', '')
+        return self.send_request(prompt)
 
 
 def main():
@@ -156,9 +149,6 @@ def main():
     parser.add_argument('--password', default='guest', help='RabbitMQ password')
     parser.add_argument('--prompt', default='Write a short poem about artificial intelligence.', 
                        help='Prompt to send')
-    parser.add_argument('--max-tokens', type=int, default=128, help='Maximum tokens to generate')
-    parser.add_argument('--temperature', type=float, default=0.8, help='Sampling temperature')
-    parser.add_argument('--system-prompt', default='', help='System prompt')
     
     args = parser.parse_args()
     
@@ -177,12 +167,7 @@ def main():
         
         # Send request
         print(f"Sending prompt: {args.prompt}")
-        response = client.send_simple_request(
-            prompt=args.prompt,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-            system_prompt=args.system_prompt
-        )
+        response = client.send_simple_request(prompt=args.prompt)
         
         print("\n" + "="*50)
         print("RESPONSE:")
