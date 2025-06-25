@@ -1,334 +1,130 @@
-# llama-messaging
+# Llama.cpp Messaging Tool with RabbitMQ Integration
 
-A RabbitMQ-based inference tool for llama.cpp that allows you to run inference requests through message queues.
-
-## Overview
-
-llama-messaging connects to a RabbitMQ instance and listens for inference requests on a specified queue. It processes these requests using a loaded llama.cpp model and sends responses back through the message queue system.
+This tool extends the basic llama.cpp functionality with RabbitMQ messaging capabilities, allowing you to send and receive messages through a RabbitMQ broker.
 
 ## Features
 
-- **Message Queue Integration**: Uses RabbitMQ for reliable message processing
-- **JSON-based API**: Simple JSON request/response format
-- **Chat Template Support**: Supports chat templates for conversation-style interactions
-- **Configurable Queues**: Customizable queue names and routing keys
-- **Error Handling**: Comprehensive error handling and reporting
-- **Graceful Shutdown**: Proper signal handling for clean shutdowns
+- **LLaMA Model Integration**: Uses llama.cpp for text generation
+- **RabbitMQ Messaging**: Optional RabbitMQ integration for message queuing
+- **Configurable**: Supports various RabbitMQ connection parameters
+- **Graceful Fallback**: Works without RabbitMQ if not available
 
 ## Prerequisites
 
-### System Dependencies
+### Required
+- CMake 3.14 or higher
+- C++17 compatible compiler
+- llama.cpp dependencies
 
-1. **RabbitMQ Server**: Install and run RabbitMQ server
-2. **AMQP C++ Client**: Install the AMQP C++ client library
-
-#### Installing RabbitMQ
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install rabbitmq-server
-sudo systemctl enable rabbitmq-server
-sudo systemctl start rabbitmq-server
-```
-
-**macOS:**
-```bash
-brew install rabbitmq
-brew services start rabbitmq
-```
-
-**Windows:**
-Download and install from [RabbitMQ website](https://www.rabbitmq.com/download.html)
-
-#### Installing AMQP C++ Client
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install libamqpcpp-dev
-```
-
-**macOS:**
-```bash
-brew install amqpcpp
-```
-
-**From Source:**
-```bash
-git clone https://github.com/CopernicaMarketingSoftware/AMQP-CPP.git
-cd AMQP-CPP
-mkdir build && cd build
-cmake ..
-make
-sudo make install
-```
+### Optional (for RabbitMQ support)
+- RabbitMQ C client library (`librabbitmq-dev`)
+- RabbitMQ server running locally or remotely
 
 ## Building
 
-Add the messaging tool to your build by including it in `tools/CMakeLists.txt`:
+### With RabbitMQ Support
+```bash
+# Install RabbitMQ C client library
+# On Ubuntu/Debian:
+sudo apt-get install librabbitmq-dev
 
-```cmake
-add_subdirectory(messaging)
+# On macOS:
+brew install rabbitmq-c
+
+# Build the project
+mkdir build && cd build
+cmake ..
+make llama-messaging
 ```
 
-Then build as usual:
+### Without RabbitMQ Support
+The tool will build and work without RabbitMQ if the library is not found:
 ```bash
-cmake --build build --config Release
+mkdir build && cd build
+cmake ..
+make llama-messaging
 ```
 
 ## Usage
 
-### Basic Usage
-
+### Basic Usage (without RabbitMQ)
 ```bash
-./llama-messaging -m /path/to/model.gguf --amqp-url amqp://localhost:5672
+./llama-messaging -m path/to/model.gguf -p "Hello, how are you?"
 ```
 
-### Advanced Usage
-
+### With RabbitMQ Integration
 ```bash
-./llama-messaging \
-  -m /path/to/model.gguf \
-  --amqp-url amqp://user:password@rabbitmq.example.com:5672/vhost \
-  --request-queue my_requests \
-  --response-queue my_responses \
-  --exchange my_exchange \
-  --routing-key inference.request \
-  --prefetch-count 5 \
-  --n-ctx 4096 \
-  --temp 0.8
+# Basic usage with RabbitMQ (uses default settings)
+./llama-messaging -m path/to/model.gguf -p "Hello, how are you?"
+
+# With custom RabbitMQ settings
+./llama-messaging -m path/to/model.gguf \
+  --rmq-host rabbitmq.example.com \
+  --rmq-port 5672 \
+  --rmq-username myuser \
+  --rmq-password mypass \
+  --rmq-exchange my_exchange \
+  --rmq-routing-key my_routing_key \
+  --rmq-queue my_queue \
+  -p "Hello, how are you?"
 ```
 
-### Command Line Options
+## RabbitMQ Configuration
 
-#### RabbitMQ Options
+The tool supports the following RabbitMQ parameters:
 
-- `--amqp-url URL`: RabbitMQ connection URL (default: `amqp://localhost:5672`)
-- `--request-queue QUEUE`: Request queue name (default: `llama_requests`)
-- `--response-queue QUEUE`: Response queue name (default: `llama_responses`)
-- `--exchange EXCHANGE`: Exchange name (default: `llama_exchange`)
-- `--routing-key KEY`: Routing key (default: `llama.inference`)
-- `--prefetch-count N`: Prefetch count (default: `1`)
-- `--no-durable`: Make queues non-durable (default: durable)
+- `--rmq-host`: RabbitMQ server host (default: localhost)
+- `--rmq-port`: RabbitMQ server port (default: 5672)
+- `--rmq-username`: RabbitMQ username (default: guest)
+- `--rmq-password`: RabbitMQ password (default: guest)
+- `--rmq-vhost`: RabbitMQ virtual host (default: /)
+- `--rmq-exchange`: RabbitMQ exchange name (default: amq.direct)
+- `--rmq-routing-key`: RabbitMQ routing key (default: llama.messages)
+- `--rmq-queue`: RabbitMQ queue name (default: llama_queue)
 
-#### Standard llama.cpp Options
+## Message Format
 
-All standard llama.cpp options are supported:
-- `-m, --model`: Model file path
-- `--n-ctx`: Context size
-- `--temp`: Temperature for sampling
-- `--top-p`: Top-p sampling
-- `--top-k`: Top-k sampling
-- `--repeat-penalty`: Repeat penalty
-- `--chat-template`: Chat template
-- And many more...
-
-## API Reference
-
-### Request Format
-
-Send JSON messages to the request queue:
-
-```json
-{
-  "id": "request-123",
-  "prompt": "What is the capital of France?",
-  "system_prompt": "You are a helpful assistant.",
-  "max_tokens": 128,
-  "temperature": 0.8,
-  "top_p": 0.95,
-  "top_k": 40,
-  "stream": false,
-  "stop_sequences": ["\n", "END"],
-  "model_name": "llama-2-7b",
-  "chat_format": "chatml"
-}
+When RabbitMQ is enabled, the tool sends messages in the following format:
+```
+Prompt: [user prompt]
+Response: [generated response]
 ```
 
-#### Request Fields
+## Example Workflow
 
-- `id` (string, required): Unique request identifier
-- `prompt` (string, required): The input prompt
-- `system_prompt` (string, optional): System prompt for chat models
-- `max_tokens` (integer, optional): Maximum tokens to generate (default: 128)
-- `temperature` (float, optional): Sampling temperature (default: 0.8)
-- `top_p` (float, optional): Top-p sampling (default: 0.95)
-- `top_k` (integer, optional): Top-k sampling (default: 40)
-- `stream` (boolean, optional): Enable streaming (not yet implemented)
-- `stop_sequences` (array, optional): Stop generation on these sequences
-- `model_name` (string, optional): Model name for logging
-- `chat_format` (string, optional): Chat format to use
+1. **Start RabbitMQ Server**:
+   ```bash
+   # Using Docker
+   docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:management
+   ```
 
-### Response Format
+2. **Run the Messaging Tool**:
+   ```bash
+   ./llama-messaging -m model.gguf -p "What is the capital of France?"
+   ```
 
-Responses are published to the response queue:
-
-```json
-{
-  "id": "request-123",
-  "content": "The capital of France is Paris.",
-  "finished": true,
-  "finish_reason": "length",
-  "prompt_tokens": 15,
-  "completion_tokens": 8,
-  "total_time_ms": 1250.5
-}
-```
-
-#### Response Fields
-
-- `id` (string): Request identifier (echoed from request)
-- `content` (string): Generated text content
-- `finished` (boolean): Whether generation is complete
-- `finish_reason` (string): Reason for stopping ("length", "stop", "eos")
-- `prompt_tokens` (integer): Number of tokens in prompt
-- `completion_tokens` (integer): Number of generated tokens
-- `total_time_ms` (float): Total processing time in milliseconds
-- `error` (string, optional): Error message if processing failed
-
-## Examples
-
-### Python Client Example
-
-```python
-import pika
-import json
-import uuid
-
-# Connect to RabbitMQ
-connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-channel = connection.channel()
-
-# Declare queues
-channel.queue_declare(queue='llama_requests', durable=True)
-channel.queue_declare(queue='llama_responses', durable=True)
-
-# Send request
-request = {
-    "id": str(uuid.uuid4()),
-    "prompt": "Explain quantum computing in simple terms.",
-    "max_tokens": 200,
-    "temperature": 0.7
-}
-
-channel.basic_publish(
-    exchange='llama_exchange',
-    routing_key='llama.inference',
-    body=json.dumps(request)
-)
-
-print(f"Sent request: {request['id']}")
-
-# Receive response
-def callback(ch, method, properties, body):
-    response = json.loads(body)
-    if response['id'] == request['id']:
-        print(f"Response: {response['content']}")
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        connection.close()
-
-channel.basic_consume(queue='llama_responses', on_message_callback=callback)
-channel.start_consuming()
-```
-
-### Node.js Client Example
-
-```javascript
-const amqp = require('amqplib');
-
-async function sendRequest() {
-    const connection = await amqp.connect('amqp://localhost');
-    const channel = await connection.createChannel();
-    
-    const request = {
-        id: Date.now().toString(),
-        prompt: "Write a haiku about programming",
-        max_tokens: 50,
-        temperature: 0.8
-    };
-    
-    await channel.assertQueue('llama_requests', { durable: true });
-    await channel.assertQueue('llama_responses', { durable: true });
-    
-    channel.sendToQueue('llama_requests', Buffer.from(JSON.stringify(request)));
-    console.log(`Sent request: ${request.id}`);
-    
-    // Listen for response
-    channel.consume('llama_responses', (msg) => {
-        const response = JSON.parse(msg.content.toString());
-        if (response.id === request.id) {
-            console.log(`Response: ${response.content}`);
-            channel.ack(msg);
-            connection.close();
-        }
-    });
-}
-
-sendRequest().catch(console.error);
-```
-
-## Configuration
-
-### RabbitMQ Configuration
-
-The tool uses standard RabbitMQ configuration. You can customize:
-
-1. **Virtual Hosts**: Use different vhosts for different environments
-2. **Users and Permissions**: Set up specific users with appropriate permissions
-3. **Queue Durability**: Use durable queues for persistence across restarts
-4. **Exchange Types**: Currently supports direct exchanges
-
-### Performance Tuning
-
-- **Prefetch Count**: Adjust based on your processing capacity
-- **Queue Durability**: Use durable queues for reliability, non-durable for performance
-- **Context Size**: Balance memory usage with generation quality
-- **Batch Processing**: Consider using multiple instances for high throughput
+3. **Monitor Messages**:
+   - Access RabbitMQ Management UI at http://localhost:15672
+   - Use default credentials: guest/guest
+   - Check the `llama_queue` for incoming messages
 
 ## Troubleshooting
 
-### Common Issues
+### RabbitMQ Connection Issues
+- Ensure RabbitMQ server is running
+- Check firewall settings
+- Verify connection parameters (host, port, credentials)
+- Check RabbitMQ logs for authentication errors
 
-1. **Connection Failed**: Check RabbitMQ server is running and accessible
-2. **Queue Not Found**: Ensure queues are declared before use
-3. **Permission Denied**: Verify user has appropriate permissions
-4. **Model Loading Failed**: Check model file path and format
+### Build Issues
+- If RabbitMQ headers are not found, the tool will build without RabbitMQ support
+- Install `librabbitmq-dev` package for RabbitMQ integration
+- Ensure pkg-config is available on your system
 
-### Logging
-
-The tool uses the standard llama.cpp logging system. Enable verbose logging:
-
-```bash
-./llama-messaging -m model.gguf --verbose
-```
-
-### Monitoring
-
-Monitor RabbitMQ queues using the management interface:
-
-```bash
-# Enable management plugin
-sudo rabbitmq-plugins enable rabbitmq_management
-
-# Access at http://localhost:15672
-# Default credentials: guest/guest
-```
-
-## Security Considerations
-
-1. **Network Security**: Use TLS/SSL for production deployments
-2. **Authentication**: Use strong credentials for RabbitMQ users
-3. **Authorization**: Limit user permissions to necessary queues/exchanges
-4. **Input Validation**: Validate all incoming requests
-5. **Resource Limits**: Set appropriate limits to prevent abuse
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Follow the existing code style
-2. Add appropriate tests
-3. Update documentation
-4. Ensure compatibility with existing llama.cpp features
+### Runtime Issues
+- The tool will continue to work even if RabbitMQ connection fails
+- Check logs for connection error messages
+- Verify RabbitMQ server is accessible from the build machine
 
 ## License
 

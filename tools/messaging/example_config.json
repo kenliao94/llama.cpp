@@ -70,7 +70,10 @@
       "port": 5672,
       "username": "guest",
       "password": "guest",
-      "vhost": "/"
+      "vhost": "/",
+      "exchange": "amq.direct",
+      "routing_key": "llama.messages",
+      "queue": "llama_queue"
     },
     "queues": {
       "request_queue": "llama_requests",
@@ -78,5 +81,10 @@
       "exchange": "llama_exchange",
       "routing_key": "llama.inference"
     }
+  },
+  "llama": {
+    "model": "path/to/your/model.gguf",
+    "prompt": "Hello, how are you today?",
+    "n_predict": 128
   }
 } 

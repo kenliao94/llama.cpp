@@ -4,19 +4,148 @@
 #include "sampling.h"
 #include "llama.h"
 
+#ifdef LLAMA_USE_RABBITMQ
+// RabbitMQ C client headers
+#include <amqp.h>
+#include <amqp_framing.h>
+#include <amqp_tcp_socket.h>
+#include <amqp_ssl_socket.h>
+#endif
+
 #include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#ifdef LLAMA_USE_RABBITMQ
+// RabbitMQ connection parameters
+struct rabbitmq_params {
+    std::string host = "localhost";
+    int port = 5672;
+    std::string username = "guest";
+    std::string password = "guest";
+    std::string vhost = "/";
+    std::string exchange = "amq.direct";
+    std::string routing_key = "llama.messages";
+    std::string queue = "llama_queue";
+};
+
+static rabbitmq_params rmq_params;
+#endif
+
 static void print_usage(int argc, char ** argv) {
     (void) argc;
 
     LOG("\nexample usage:\n");
     LOG("\n  %s -m your_model.gguf\n", argv[0]);
+#ifdef LLAMA_USE_RABBITMQ
+    LOG("\nRabbitMQ options:\n");
+    LOG("  --rmq-host HOST        RabbitMQ host (default: localhost)\n");
+    LOG("  --rmq-port PORT        RabbitMQ port (default: 5672)\n");
+    LOG("  --rmq-username USER    RabbitMQ username (default: guest)\n");
+    LOG("  --rmq-password PASS    RabbitMQ password (default: guest)\n");
+    LOG("  --rmq-vhost VHOST      RabbitMQ vhost (default: /)\n");
+    LOG("  --rmq-exchange EXCH    RabbitMQ exchange (default: amq.direct)\n");
+    LOG("  --rmq-routing-key KEY  RabbitMQ routing key (default: llama.messages)\n");
+    LOG("  --rmq-queue QUEUE      RabbitMQ queue name (default: llama_queue)\n");
+#endif
     LOG("\n");
 }
+
+#ifdef LLAMA_USE_RABBITMQ
+// Function to handle RabbitMQ connection
+amqp_connection_state_t connect_rabbitmq() {
+    amqp_connection_state_t conn = amqp_new_connection();
+    amqp_socket_t *socket = amqp_tcp_socket_new(conn);
+    
+    if (!socket) {
+        LOG_ERR("Failed to create TCP socket\n");
+        return nullptr;
+    }
+    
+    int status = amqp_socket_open(socket, rmq_params.host.c_str(), rmq_params.port);
+    if (status) {
+        LOG_ERR("Failed to open socket to %s:%d\n", rmq_params.host.c_str(), rmq_params.port);
+        return nullptr;
+    }
+    
+    amqp_rpc_reply_t reply = amqp_login(conn, rmq_params.vhost.c_str(), 0, 131072, 0, 
+                                       AMQP_SASL_METHOD_PLAIN, rmq_params.username.c_str(), 
+                                       rmq_params.password.c_str());
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        LOG_ERR("Failed to login to RabbitMQ\n");
+        return nullptr;
+    }
+    
+    amqp_channel_open(conn, 1);
+    reply = amqp_get_rpc_reply(conn);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        LOG_ERR("Failed to open channel\n");
+        return nullptr;
+    }
+    
+    // Declare queue
+    amqp_queue_declare(conn, 1, amqp_cstring_bytes(rmq_params.queue.c_str()), 0, 1, 0, 0, 
+                      amqp_empty_table);
+    reply = amqp_get_rpc_reply(conn);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        LOG_ERR("Failed to declare queue\n");
+        return nullptr;
+    }
+    
+    // Bind queue to exchange
+    amqp_queue_bind(conn, 1, amqp_cstring_bytes(rmq_params.queue.c_str()), 
+                   amqp_cstring_bytes(rmq_params.exchange.c_str()), 
+                   amqp_cstring_bytes(rmq_params.routing_key.c_str()), 
+                   amqp_empty_table);
+    reply = amqp_get_rpc_reply(conn);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        LOG_ERR("Failed to bind queue\n");
+        return nullptr;
+    }
+    
+    LOG_INF("Connected to RabbitMQ at %s:%d\n", rmq_params.host.c_str(), rmq_params.port);
+    return conn;
+}
+
+// Function to send message to RabbitMQ
+bool send_rabbitmq_message(amqp_connection_state_t conn, const std::string& message) {
+    amqp_basic_properties_t props;
+    props._flags = AMQP_BASIC_CONTENT_TYPE_FLAG | AMQP_BASIC_DELIVERY_MODE_FLAG;
+    props.content_type = amqp_cstring_bytes("text/plain");
+    props.delivery_mode = 2; // persistent message
+    
+    int result = amqp_basic_publish(conn, 1, amqp_cstring_bytes(rmq_params.exchange.c_str()),
+                                   amqp_cstring_bytes(rmq_params.routing_key.c_str()), 0, 0,
+                                   &props, amqp_cstring_bytes(message.c_str()));
+    
+    if (result < 0) {
+        LOG_ERR("Failed to publish message to RabbitMQ\n");
+        return false;
+    }
+    
+    LOG_INF("Sent message to RabbitMQ: %s\n", message.c_str());
+    return true;
+}
+
+// Function to receive message from RabbitMQ
+std::string receive_rabbitmq_message(amqp_connection_state_t conn) {
+    amqp_rpc_reply_t reply;
+    amqp_envelope_t envelope;
+    
+    reply = amqp_consume_message(conn, &envelope, nullptr, 0);
+    if (reply.reply_type != AMQP_RESPONSE_NORMAL) {
+        return "";
+    }
+    
+    std::string message((char*)envelope.message.body.bytes, envelope.message.body.len);
+    amqp_destroy_envelope(&envelope);
+    
+    LOG_INF("Received message from RabbitMQ: %s\n", message.c_str());
+    return message;
+}
+#endif
 
 int main(int argc, char ** argv) {
     common_params params;
@@ -26,6 +155,15 @@ int main(int argc, char ** argv) {
     }
 
     common_init();
+
+#ifdef LLAMA_USE_RABBITMQ
+    // Initialize RabbitMQ connection
+    amqp_connection_state_t rmq_conn = nullptr;
+    rmq_conn = connect_rabbitmq();
+    if (!rmq_conn) {
+        LOG_ERR("Failed to connect to RabbitMQ. Continuing without RabbitMQ support.\n");
+    }
+#endif
 
     // Set default prompt if not provided
     if (params.prompt.empty()) {
@@ -151,6 +289,23 @@ int main(int argc, char ** argv) {
     }
     
     LOG("\n\n");
+    
+#ifdef LLAMA_USE_RABBITMQ
+    // Send the complete response to RabbitMQ if connected
+    if (rmq_conn) {
+        std::string message = "Prompt: " + params.prompt + "\nResponse: " + response;
+        if (send_rabbitmq_message(rmq_conn, message)) {
+            LOG_INF("Response sent to RabbitMQ successfully\n");
+        } else {
+            LOG_ERR("Failed to send response to RabbitMQ\n");
+        }
+        
+        // Close RabbitMQ connection
+        amqp_channel_close(rmq_conn, 1, AMQP_REPLY_SUCCESS);
+        amqp_connection_close(rmq_conn, AMQP_REPLY_SUCCESS);
+        amqp_destroy_connection(rmq_conn);
+    }
+#endif
     
     // cleanup
     common_sampler_free(smpl);

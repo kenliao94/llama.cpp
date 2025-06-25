@@ -1,8 +1,30 @@
 set(TARGET llama-messaging)
 
+# Find RabbitMQ C client library (optional)
+find_package(PkgConfig)
+if (PkgConfig_FOUND)
+    pkg_check_modules(RABBITMQ librabbitmq)
+endif()
+
 add_executable(${TARGET} messaging.cpp)
 install(TARGETS ${TARGET} RUNTIME)
 
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/vendor)
 target_link_libraries(${TARGET} PRIVATE common llama ${CMAKE_THREAD_LIBS_INIT})
-target_compile_features(${TARGET} PRIVATE cxx_std_17) 
+target_compile_features(${TARGET} PRIVATE cxx_std_17)
+
+# Add RabbitMQ support if found
+if (RABBITMQ_FOUND)
+    target_include_directories(${TARGET} PRIVATE ${RABBITMQ_INCLUDE_DIRS})
+    target_link_directories(${TARGET} PRIVATE ${RABBITMQ_LIBRARY_DIRS})
+    target_link_libraries(${TARGET} PRIVATE ${RABBITMQ_LIBRARIES})
+    target_compile_options(${TARGET} PRIVATE ${RABBITMQ_CFLAGS_OTHER})
+    target_compile_definitions(${TARGET} PRIVATE LLAMA_USE_RABBITMQ)
+    message(STATUS "RabbitMQ support enabled")
+    message(STATUS "RabbitMQ include dirs: ${RABBITMQ_INCLUDE_DIRS}")
+    message(STATUS "RabbitMQ library dirs: ${RABBITMQ_LIBRARY_DIRS}")
+    message(STATUS "RabbitMQ libraries: ${RABBITMQ_LIBRARIES}")
+else()
+    message(STATUS "RabbitMQ not found - messaging tool will be built without RabbitMQ support")
+    message(STATUS "To enable RabbitMQ support, install librabbitmq-dev package")
+endif() 
